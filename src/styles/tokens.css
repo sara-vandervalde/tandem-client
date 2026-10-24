@@ -1,0 +1,68 @@
+/*
+  Design tokens – the single source of every color, size and shadow.
+  Components never use raw hex values; they use these variables,
+  so changing the brand is a change in one file.
+*/
+:root {
+  /* Brand */
+  --c-plum-900: #1c1033;
+  --c-plum-800: #2b1b4a;
+  --c-plum-600: #4a3279;
+  --c-plum-100: #ece6f7;
+  --c-coral-500: #ff6b4a;
+  --c-coral-600: #e8434f;
+  --c-coral-100: #ffe9e2;
+  --grad-brand: linear-gradient(135deg, #ff8a5b 0%, #e8434f 100%);
+  --grad-night: linear-gradient(135deg, #2b1b4a 0%, #4a3279 60%, #6b3f8f 100%);
+
+  /* Neutrals (warm, not gray) */
+  --c-bg: #faf7f2;
+  --c-surface: #ffffff;
+  --c-surface-2: #f4efe8;
+  --c-line: #e9e2d8;
+  --c-ink: #221a33;
+  --c-ink-2: #5d5570;
+  --c-ink-3: #8c859b;
+
+  /* Meaning */
+  --c-success: #23896a;
+  --c-success-bg: #e1f4ec;
+  --c-warning: #b7791f;
+  --c-warning-bg: #fdf1dc;
+  --c-danger: #d13a4a;
+  --c-danger-bg: #fde7e9;
+  --c-info: #4a3279;
+  --c-info-bg: #ece6f7;
+
+  /* Type */
+  --font-display: 'Rubik', 'Segoe UI', system-ui, sans-serif;
+  --font-body: 'Heebo', 'Segoe UI', system-ui, sans-serif;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.875rem;
+  --fs-md: 1rem;
+  --fs-lg: 1.25rem;
+  --fs-xl: 1.75rem;
+  --fs-2xl: clamp(2rem, 4vw, 3rem);
+
+  /* Space (4px grid) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --sp-8: 72px;
+
+  /* Shape & depth */
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 24px;
+  --r-pill: 999px;
+  --shadow-1: 0 1px 2px rgb(34 26 51 / 0.06), 0 2px 8px rgb(34 26 51 / 0.04);
+  --shadow-2: 0 2px 4px rgb(34 26 51 / 0.05), 0 12px 32px -8px rgb(34 26 51 / 0.14);
+  --shadow-glow: 0 8px 24px -6px rgb(232 67 79 / 0.45);
+  --focus: 0 0 0 3px rgb(255 107 74 / 0.35);
+
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
