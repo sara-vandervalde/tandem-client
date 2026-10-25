@@ -186,7 +186,8 @@ export default function EventDetailsPage() {
   const tabLabels: Record<Tab, string> = {
     areas: 'תחומי אחריות',
     items: publicItems.length ? `מה להביא · ${claimedItems}/${publicItems.length}` : 'מה להביא',
-    money: 'תשלומים',
+    // Before closing it is only an estimate; after closing these are the real payments
+    money: event.status === 'Settled' ? 'תשלומים' : 'הערכת תשלום',
     chat: '💬 הודעות',
   }
 

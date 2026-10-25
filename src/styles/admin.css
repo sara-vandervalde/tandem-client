@@ -1,0 +1,30 @@
+/* ---------- Admin: tiles and data tables ---------- */
+.admin-tiles .money-tile.active { border-color: var(--c-plum-800); background: linear-gradient(135deg, var(--c-plum-100), var(--c-surface)); }
+.admin-tiles .money-tile b { color: var(--c-plum-800); }
+
+.table-card { padding: 0; overflow: hidden; }
+.table-card .pager { padding: var(--sp-3); margin: 0; border-top: 1px solid var(--c-line); }
+.table-scroll { overflow-x: auto; }
+
+.data-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.data-table th {
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--c-bg);
+  border-bottom: 1px solid var(--c-line);
+  font: 600 var(--fs-xs) / 1.2 var(--font-display);
+  color: var(--c-ink-3);
+  text-align: start;
+  white-space: nowrap;
+}
+.data-table td { padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--c-line); white-space: nowrap; }
+.data-table tbody tr { transition: background 0.15s; }
+.data-table tbody tr:hover { background: var(--c-bg); }
+.data-table tbody tr:last-child td { border-bottom: 0; }
+.data-table tr.is-blocked td { color: var(--c-ink-3); }
+.data-table tr.is-blocked .avatar { filter: grayscale(1); opacity: 0.6; }
+
+.cell-person { display: inline-flex; align-items: center; gap: var(--sp-2); font-weight: 500; color: var(--c-ink); }
+.cell-person .avatar { border: 0; }
+a.cell-person:hover { text-decoration: none; color: var(--c-coral-600); }
+.cell-email { text-align: end; color: var(--c-ink-2); }
+.cell-actions { text-align: end; }

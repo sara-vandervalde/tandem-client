@@ -12,7 +12,7 @@ import EventsPage from './features/events/EventsPage'
 import EventDetailsPage from './features/events/EventDetailsPage'
 import EventSummaryPage from './features/events/EventSummaryPage'
 import PaymentsPage from './features/payments/PaymentsPage'
-import ComingSoon from './pages/ComingSoon'
+import AdminPage from './features/admin/AdminPage'
 import DesignPreview from './pages/DesignPreview'
 
 export default function App() {
@@ -41,7 +41,7 @@ export default function App() {
 
             <Route element={<ProtectedRoute adminOnly />}>
               <Route element={<AppLayout />}>
-                <Route path="admin" element={<ComingSoon title="ניהול" />} />
+                <Route path="admin" element={<AdminPage />} />
               </Route>
             </Route>
 
