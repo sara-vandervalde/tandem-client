@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import axios from 'axios'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import * as eventsApi from '../../api/events'
 import * as groupsApi from '../../api/groups'
 import { getErrorMessage } from '../../api/errors'
@@ -14,6 +14,7 @@ import AreaEditModal from './AreaEditModal'
 import EventSettingsModal from './EventSettingsModal'
 import ItemsSection from './ItemsSection'
 import SettlementSection from './SettlementSection'
+import MessagesSection from './MessagesSection'
 import { statusInfo } from './eventUi'
 import type { GroupDetails } from '../../types/groups'
 import type { Area, EventDetails, Item, MealType } from '../../types/events'
@@ -22,10 +23,29 @@ const areaNames: Record<Area, string> = { venue: 'המקום', gift: 'המתנה
 const mealLabels: Record<MealType, string> = { Shared: 'ארוחה משותפת', Catering: 'קייטרינג', SelfMade: 'מכינה לבד' }
 const splitLabels = { Equal: 'שווה בשווה בין כל הקבוצה', OrganizerPays: 'האחראית משלמת', SelectedMembers: 'בין משתתפות נבחרות' }
 
+type Tab = 'areas' | 'items' | 'money' | 'chat'
+const tabs: Tab[] = ['areas', 'items', 'money', 'chat']
+
 type Confirm = { title: string; text: string; action: () => Promise<void>; success: string; after?: () => void }
 
 function isConflict(err: unknown): boolean {
   return axios.isAxiosError(err) && err.response?.status === 409
+}
+
+// The progress ring in the header: an SVG circle whose visible stroke length is the percentage
+function ProgressRing({ done, total }: { done: number; total: number }) {
+  const radius = 26
+  const length = 2 * Math.PI * radius
+  return (
+    <div className="ring" aria-label={`${done} מתוך ${total} מוכנים`}>
+      <svg width="64" height="64" viewBox="0 0 64 64">
+        <circle cx="32" cy="32" r={radius} className="ring-track" />
+        <circle cx="32" cy="32" r={radius} className="ring-value"
+          strokeDasharray={length} strokeDashoffset={length * (1 - done / total)} />
+      </svg>
+      <span>{done}/{total}</span>
+    </div>
+  )
 }
 
 export default function EventDetailsPage() {
@@ -33,6 +53,10 @@ export default function EventDetailsPage() {
   const { user } = useAuth()
   const { showToast } = useToast()
   const navigate = useNavigate()
+  // The open tab lives in the URL (?tab=items), so "back" works and a link can open a tab
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tabParam = searchParams.get('tab') as Tab | null
+  const tab: Tab = tabParam && tabs.includes(tabParam) ? tabParam : 'areas'
 
   const [event, setEvent] = useState<EventDetails | null>(null)
   const [group, setGroup] = useState<GroupDetails | null>(null)
@@ -43,6 +67,7 @@ export default function EventDetailsPage() {
   const [conflicts, setConflicts] = useState<Partial<Record<Area | 'organizer', string>>>({})
   const [editing, setEditing] = useState<Area | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
   const [confirm, setConfirm] = useState<Confirm | null>(null)
 
   const load = useCallback(async () => {
@@ -94,6 +119,10 @@ export default function EventDetailsPage() {
     }
   }
 
+  function openTab(next: Tab) {
+    setSearchParams(next === 'areas' ? {} : { tab: next }, { replace: true })
+  }
+
   if (error) {
     return (
       <div className="stack">
@@ -116,6 +145,7 @@ export default function EventDetailsPage() {
   const isClosed = event.status === 'Settled' || event.status === 'Cancelled'
   const canClaimAreas = event.organizerId !== null && (event.organizationMode === 'Open' || isOrganizer)
   const canDelete = event.status === 'Draft' && (event.createdById === user?.id || group?.managerId === user?.id)
+  const canCancel = isOrganizer && !isClosed
   const date = new Date(event.eventDate)
 
   const areas: AreaView[] = [
@@ -140,44 +170,80 @@ export default function EventDetailsPage() {
   }
 
   // The same checklist the server uses to set "Organized" automatically
+  const publicItems = items?.filter(i => !i.isPrivate) ?? []
+  const claimedItems = publicItems.filter(i => i.assigneeId !== null).length
   const checks = [
     { label: 'אחראית אירוע', done: event.organizerId !== null },
-    ...areas.map(a => ({ label: a.title, done: a.responsibleId !== null && a.price !== null })),
+    ...areas.map(a => ({
+      label: a.responsibleId === null ? a.title : `מחיר ${a.title}`,
+      done: a.responsibleId !== null && a.price !== null,
+    })),
+    ...(publicItems.length > 0 ? [{ label: 'פריטים ברשימה', done: claimedItems === publicItems.length }] : []),
   ]
-  const publicItems = items?.filter(i => !i.isPrivate) ?? []
-  if (publicItems.length > 0) {
-    const claimed = publicItems.filter(i => i.assigneeId !== null).length
-    checks.push({ label: `מה להביא (${claimed}/${publicItems.length})`, done: claimed === publicItems.length })
-  }
   const doneCount = checks.filter(c => c.done).length
+  const missing = checks.filter(c => !c.done).map(c => c.label)
+
+  const tabLabels: Record<Tab, string> = {
+    areas: 'תחומי אחריות',
+    items: publicItems.length ? `מה להביא · ${claimedItems}/${publicItems.length}` : 'מה להביא',
+    money: 'תשלומים',
+    chat: '💬 הודעות',
+  }
 
   return (
     <div className="stack" style={{ gap: 'var(--sp-5)' }}>
       <Link to="/events" className="back-link">→ לכל האירועים</Link>
 
-      {/* Hero: date, title, group, status */}
+      {/* Header: date, title, status, progress and actions - everything at a glance */}
       <section className="event-hero" style={{ '--group-color': colorFor(event.groupName) } as CSSProperties}>
         <div className="event-hero-date">
           <b>{date.getDate()}</b>
           <span>{date.toLocaleDateString('he-IL', { month: 'short' })}</span>
           <small>{date.toLocaleDateString('he-IL', { weekday: 'long' })}</small>
         </div>
+
         <div className="event-hero-text">
           <span className={`badge ${statusInfo[event.status].className}`}>{statusInfo[event.status].label}</span>
           <h1>{event.title}</h1>
           <p>
             <Link to={`/groups/${event.groupId}`}>{event.groupName}</Link>
             {event.organizerName && <> · אחראית: {isOrganizer ? 'את' : event.organizerName}</>}
+            {event.organizerId !== null && <> · {event.organizationMode === 'Open' ? 'פתוח לכולן' : 'Solo'}</>}
           </p>
+          {!isClosed && event.organizerId !== null && (
+            <p className="event-hero-missing">{missing.length === 0 ? '✓ הכול מוכן' : `חסר: ${missing.join(' · ')}`}</p>
+          )}
         </div>
+
+        {!isClosed && event.organizerId !== null && <ProgressRing done={doneCount} total={checks.length} />}
+
         <div className="event-hero-actions">
           {isOrganizer && !isClosed && <button className="btn btn-glass btn-sm" onClick={() => setSettingsOpen(true)}>⚙ הגדרות</button>}
           <Link to={`/events/${event.id}/summary`} className="btn btn-glass btn-sm">🖨 סיכום</Link>
+          {(canCancel || canDelete) && (
+            <div className="menu">
+              <button className="btn btn-glass btn-sm" aria-label="עוד פעולות" aria-expanded={menuOpen} onClick={() => setMenuOpen(o => !o)}>⋯</button>
+              {menuOpen && (
+                <div className="menu-pop" onMouseLeave={() => setMenuOpen(false)}>
+                  <button className="menu-danger" onClick={() => {
+                    setMenuOpen(false)
+                    setConfirm(canDelete
+                      ? { title: 'למחוק את הטיוטה?', text: 'אי אפשר לבטל את הפעולה הזו.', action: () => eventsApi.deleteEvent(event.id), success: 'הטיוטה נמחקה', after: () => navigate('/events') }
+                      : { title: 'לבטל את האירוע?', text: 'האירוע יישאר בלוח כ"בוטל", וכל החברות יראו זאת. אי אפשר יהיה לשנות אותו.', action: () => eventsApi.cancelEvent(event.id), success: 'האירוע בוטל' })
+                  }}>
+                    {canDelete ? '🗑 מחיקת הטיוטה' : '✕ ביטול האירוע'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </section>
 
-      {/* No organizer yet: the main call to action */}
-      {event.organizerId === null && !isClosed && (
+      {event.status === 'Cancelled' && <div className="alert alert-info"><p>האירוע בוטל.</p></div>}
+
+      {/* No organizer yet: the one thing to do on this page */}
+      {event.organizerId === null && !isClosed ? (
         <section className={`card claim-banner ${conflicts.organizer ? 'has-conflict' : ''}`}>
           <span className="claim-emoji">🙋‍♀️</span>
           <div style={{ flex: 1 }}>
@@ -189,82 +255,59 @@ export default function EventDetailsPage() {
             {busy === 'organizer' ? <span className="spinner" /> : 'אני אחראית האירוע'}
           </button>
         </section>
-      )}
-
-      {/* Progress toward "Organized" */}
-      {!isClosed && event.organizerId !== null && (
-        <section className="card readiness">
-          <div className="readiness-top">
-            <div>
-              <h3>{doneCount === checks.length ? 'הכול מוכן 🎉' : 'מה עוד חסר?'}</h3>
-              <p className="muted">{doneCount} מתוך {checks.length} מוכנים · חלוקה: {splitLabels[event.splitMethod]} · {event.organizationMode === 'Open' ? 'פתוח לכולן' : 'Solo'}</p>
-            </div>
-            <span className="readiness-num">{Math.round((doneCount / checks.length) * 100)}%</span>
-          </div>
-          <div className="progress"><span style={{ width: `${(doneCount / checks.length) * 100}%` }} /></div>
-          <div className="readiness-checks">
-            {checks.map(c => <span key={c.label} className={c.done ? 'is-done' : ''}>{c.done ? '✓' : '○'} {c.label}</span>)}
-          </div>
-        </section>
-      )}
-
-      {event.status === 'Cancelled' && <div className="alert alert-info"><p>האירוע בוטל.</p></div>}
-
-      {/* Areas of responsibility */}
-      <section className="stack">
-        <h2 className="section-title">תחומי אחריות</h2>
-        <div className="area-grid">
-          {areas.map(a => (
-            <AreaCard
-              key={a.area}
-              view={a}
-              userId={user?.id}
-              canClaim={canClaimAreas}
-              isClosed={isClosed || event.organizerId === null}
-              busy={busy === a.area}
-              conflict={conflicts[a.area] ?? null}
-              onClaim={() => claim(a.area)}
-              onEdit={() => setEditing(a.area)}
-              onRelease={() => setConfirm({
-                title: `לוותר על ${areaNames[a.area]}?`,
-                text: 'התחום יחזור להיות פנוי, ומישהי אחרת תוכל לקחת אותו.',
-                action: () => eventsApi.releaseArea(event.id, a.area),
-                success: 'התחום שוחרר',
-              })}
-            />
-          ))}
-        </div>
-      </section>
-
-      <ItemsSection event={event} items={items} userId={user?.id} isClosed={isClosed} onChanged={load} />
-
-      <SettlementSection event={event} userId={user?.id} onClosed={load} />
-
-      {/* Participants (only when the organizer chose them) */}
-      {event.splitMethod === 'SelectedMembers' && event.participants.length > 0 && (
-        <section className="card stack">
-          <h3>משתתפות בתשלום</h3>
-          <div className="row">
-            {event.participants.map(p => (
-              <span key={p.userId} className="person-chip"><Avatar name={p.fullName} size={24} />{p.fullName}</span>
+      ) : (
+        <>
+          {/* Tabs: one task per screen */}
+          <nav className="tabs" role="tablist">
+            {tabs.map(t => (
+              <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'active' : ''} onClick={() => openTab(t)}>
+                {tabLabels[t]}
+              </button>
             ))}
-          </div>
-        </section>
-      )}
+          </nav>
 
-      {/* Danger zone: cancel (organizer) or delete a draft (creator / group manager) */}
-      {!isClosed && (isOrganizer || canDelete) && (
-        <section className="danger-zone">
-          <div>
-            <b>{canDelete ? 'מחיקת הטיוטה' : 'ביטול האירוע'}</b>
-            <p className="muted" style={{ fontSize: 'var(--fs-sm)' }}>{canDelete ? 'הטיוטה תימחק לגמרי.' : 'האירוע יישאר בלוח כ"בוטל", ואי אפשר יהיה לשנות אותו.'}</p>
-          </div>
-          <button className="btn btn-danger btn-sm" onClick={() => setConfirm(canDelete
-            ? { title: 'למחוק את הטיוטה?', text: 'אי אפשר לבטל את הפעולה הזו.', action: () => eventsApi.deleteEvent(event.id), success: 'הטיוטה נמחקה', after: () => navigate('/events') }
-            : { title: 'לבטל את האירוע?', text: 'כל החברות יראו שהאירוע בוטל.', action: () => eventsApi.cancelEvent(event.id), success: 'האירוע בוטל' })}>
-            {canDelete ? 'מחיקה' : 'ביטול אירוע'}
-          </button>
-        </section>
+          {tab === 'areas' && (
+            <div className="area-grid">
+              {areas.map(a => (
+                <AreaCard
+                  key={a.area}
+                  view={a}
+                  userId={user?.id}
+                  canClaim={canClaimAreas}
+                  isClosed={isClosed}
+                  busy={busy === a.area}
+                  conflict={conflicts[a.area] ?? null}
+                  onClaim={() => claim(a.area)}
+                  onEdit={() => setEditing(a.area)}
+                  onRelease={() => setConfirm({
+                    title: `לוותר על ${areaNames[a.area]}?`,
+                    text: 'התחום יחזור להיות פנוי, ומישהי אחרת תוכל לקחת אותו.',
+                    action: () => eventsApi.releaseArea(event.id, a.area),
+                    success: 'התחום שוחרר',
+                  })}
+                />
+              ))}
+            </div>
+          )}
+
+          {tab === 'items' && <ItemsSection event={event} items={items} userId={user?.id} isClosed={isClosed} onChanged={load} />}
+
+          {tab === 'chat' && <MessagesSection eventId={event.id} userId={user?.id} />}
+
+          {tab === 'money' && (
+            <div className="stack">
+              <p className="muted">חלוקה: {splitLabels[event.splitMethod]}</p>
+              {event.splitMethod === 'SelectedMembers' && event.participants.length > 0 && (
+                <div className="row">
+                  {event.participants.map(p => (
+                    <span key={p.userId} className="person-chip"><Avatar name={p.fullName} size={24} />{p.fullName}</span>
+                  ))}
+                </div>
+              )}
+              <SettlementSection event={event} userId={user?.id} onClosed={load} />
+            </div>
+          )}
+        </>
       )}
 
       {editing && (
