@@ -10,6 +10,8 @@ import GroupsPage from './features/groups/GroupsPage'
 import GroupDetailsPage from './features/groups/GroupDetailsPage'
 import EventsPage from './features/events/EventsPage'
 import EventDetailsPage from './features/events/EventDetailsPage'
+import EventSummaryPage from './features/events/EventSummaryPage'
+import PaymentsPage from './features/payments/PaymentsPage'
 import ComingSoon from './pages/ComingSoon'
 import DesignPreview from './pages/DesignPreview'
 
@@ -32,7 +34,8 @@ export default function App() {
                 <Route path="groups/:id" element={<GroupDetailsPage />} />
                 <Route path="events" element={<EventsPage />} />
                 <Route path="events/:id" element={<EventDetailsPage />} />
-                <Route path="payments" element={<ComingSoon title="תשלומים" />} />
+                <Route path="events/:id/summary" element={<EventSummaryPage />} />
+                <Route path="payments" element={<PaymentsPage />} />
               </Route>
             </Route>
 

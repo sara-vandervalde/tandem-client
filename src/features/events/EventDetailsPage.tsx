@@ -13,6 +13,7 @@ import AreaCard, { type AreaView } from './AreaCard'
 import AreaEditModal from './AreaEditModal'
 import EventSettingsModal from './EventSettingsModal'
 import ItemsSection from './ItemsSection'
+import SettlementSection from './SettlementSection'
 import { statusInfo } from './eventUi'
 import type { GroupDetails } from '../../types/groups'
 import type { Area, EventDetails, Item, MealType } from '../../types/events'
@@ -171,6 +172,7 @@ export default function EventDetailsPage() {
         </div>
         <div className="event-hero-actions">
           {isOrganizer && !isClosed && <button className="btn btn-glass btn-sm" onClick={() => setSettingsOpen(true)}>⚙ הגדרות</button>}
+          <Link to={`/events/${event.id}/summary`} className="btn btn-glass btn-sm">🖨 סיכום</Link>
         </div>
       </section>
 
@@ -235,6 +237,8 @@ export default function EventDetailsPage() {
       </section>
 
       <ItemsSection event={event} items={items} userId={user?.id} isClosed={isClosed} onChanged={load} />
+
+      <SettlementSection event={event} userId={user?.id} onClosed={load} />
 
       {/* Participants (only when the organizer chose them) */}
       {event.splitMethod === 'SelectedMembers' && event.participants.length > 0 && (
