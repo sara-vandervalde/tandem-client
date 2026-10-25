@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '../../api/queryClient'
 import { Link } from 'react-router-dom'
 import * as settlementsApi from '../../api/settlements'
 import { getErrorMessage } from '../../api/errors'
@@ -14,35 +16,26 @@ type Tab = 'pay' | 'receive'
 // "My payments": what I pay (with where to transfer) and what I receive
 export default function PaymentsPage() {
   const { showToast } = useToast()
-  const [list, setList] = useState<MySettlement[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
   const [tab, setTab] = useState<Tab>('pay')
-  const [busyId, setBusyId] = useState<number | null>(null)
 
-  const load = useCallback(async () => {
-    try {
-      setList(await settlementsApi.getMySettlements())
-    } catch (err) {
-      setError(getErrorMessage(err))
-    }
-  }, [])
+  const settlementsQuery = useQuery({ queryKey: queryKeys.mySettlements, queryFn: settlementsApi.getMySettlements })
+  const list: MySettlement[] | null = settlementsQuery.data ?? null
+  const error = settlementsQuery.error ? getErrorMessage(settlementsQuery.error) : null
 
-  useEffect(() => {
-    load()
-  }, [load])
-
-  async function togglePaid(s: MySettlement) {
-    setBusyId(s.id)
-    try {
-      await settlementsApi.setPaid(s.id, !s.isPaid)
-      showToast(s.isPaid ? 'הסימון בוטל' : `סומן ששילמת ל${s.toUserName} ✓`)
-      await load()
-    } catch (err) {
-      showToast(getErrorMessage(err), 'error')
-    } finally {
-      setBusyId(null)
-    }
-  }
+  // "I paid" / cancel the mark. The variables are the payment, so the toast knows its name
+  const paidMutation = useMutation({
+    mutationFn: (s: MySettlement) => settlementsApi.setPaid(s.id, !s.isPaid),
+    onSuccess: (_data, s) => showToast(s.isPaid ? 'הסימון בוטל' : `סומן ששילמת ל${s.toUserName} ✓`),
+    onError: err => showToast(getErrorMessage(err), 'error'),
+    // Reload my payments, and the event pages that show who already paid
+    onSettled: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.mySettlements }),
+      queryClient.invalidateQueries({ queryKey: ['event'] }),
+    ]),
+  })
+  const togglePaid = (s: MySettlement) => paidMutation.mutate(s)
+  const busyId = paidMutation.isPending ? paidMutation.variables?.id : null
 
   async function copy(text: string) {
     try {

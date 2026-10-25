@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as messagesApi from '../../api/messages'
 import { getErrorMessage } from '../../api/errors'
+import { queryKeys } from '../../api/queryClient'
 import { useToast } from '../../components/ToastContext'
 import Avatar from '../../components/Avatar'
 import type { Message } from '../../api/messages'
@@ -18,44 +20,45 @@ function dayOf(iso: string) {
   return new Date(iso).toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' })
 }
 
-// The event's message board. Not a live chat: every 5 seconds we ask the server
-// for the latest page ("polling"), so new messages appear almost immediately.
+// The event's message board. Not a live chat: React Query asks the server for the latest page
+// every 5 seconds (refetchInterval = "polling"), so new messages appear almost immediately.
 export default function MessagesSection({ eventId, userId }: Props) {
   const { showToast } = useToast()
-  // Kept oldest -> newest, the order they are shown in
-  const [messages, setMessages] = useState<Message[] | null>(null)
-  const [hasOlder, setHasOlder] = useState(false)
+  const queryClient = useQueryClient()
+  // Older pages the user asked for with "earlier messages"
+  const [older, setOlder] = useState<Message[]>([])
   const [olderPage, setOlderPage] = useState(2)
+  const [noMoreOlder, setNoMoreOlder] = useState(false)
   const [text, setText] = useState('')
-  const [sending, setSending] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
 
-  // Merge by id, so polling never duplicates a message we already have
-  const merge = useCallback((incoming: Message[]) => {
-    setMessages(prev => {
-      const byId = new Map((prev ?? []).map(m => [m.id, m]))
-      for (const m of incoming) byId.set(m.id, m)
-      return [...byId.values()].sort((a, b) => a.id - b.id)
-    })
-  }, [])
+  // The newest page. Polling stops by itself when this tab is closed (the component unmounts)
+  const latestQuery = useQuery({
+    queryKey: queryKeys.messages(eventId),
+    queryFn: () => messagesApi.getMessages(eventId),
+    refetchInterval: REFRESH_MS,
+  })
 
-  const refresh = useCallback(async () => {
-    try {
-      const page = await messagesApi.getMessages(eventId)
-      merge(page.items)
-      setHasOlder(prev => prev || page.totalPages > 1)
-    } catch {
-      // A failed poll is silent; the next one in 5 seconds will try again
-    }
-  }, [eventId, merge])
+  // Older + newest, merged by id (no duplicates), shown oldest -> newest
+  const messages = useMemo(() => {
+    if (!latestQuery.data) return null
+    const byId = new Map<number, Message>()
+    for (const m of [...older, ...latestQuery.data.items]) byId.set(m.id, m)
+    return [...byId.values()].sort((a, b) => a.id - b.id)
+  }, [older, latestQuery.data])
+  const hasOlder = !noMoreOlder && (latestQuery.data?.totalPages ?? 0) >= olderPage
 
-  useEffect(() => {
-    refresh()
-    const timer = setInterval(refresh, REFRESH_MS)
-    // Leaving the tab stops the polling
-    return () => clearInterval(timer)
-  }, [refresh])
+  const sendMutation = useMutation({
+    mutationFn: (clean: string) => messagesApi.sendMessage(eventId, clean),
+    onSuccess: () => {
+      stickToBottom.current = true
+      setText('')
+      // Load the newest page now, without waiting for the next poll
+      queryClient.invalidateQueries({ queryKey: queryKeys.messages(eventId) })
+    },
+    onError: err => showToast(getErrorMessage(err), 'error'),
+  })
 
   // Scroll to the newest message - unless the user scrolled up to read older ones
   useEffect(() => {
@@ -72,29 +75,18 @@ export default function MessagesSection({ eventId, userId }: Props) {
     try {
       const page = await messagesApi.getMessages(eventId, olderPage)
       stickToBottom.current = false
-      merge(page.items)
+      setOlder(prev => [...prev, ...page.items])
       setOlderPage(p => p + 1)
-      setHasOlder(olderPage < page.totalPages)
+      if (olderPage >= page.totalPages) setNoMoreOlder(true)
     } catch (err) {
       showToast(getErrorMessage(err), 'error')
     }
   }
 
-  async function send(e?: FormEvent) {
+  function send(e?: FormEvent) {
     e?.preventDefault()
     const clean = text.trim()
-    if (!clean || sending) return
-    setSending(true)
-    try {
-      const saved = await messagesApi.sendMessage(eventId, clean)
-      stickToBottom.current = true
-      merge([saved])
-      setText('')
-    } catch (err) {
-      showToast(getErrorMessage(err), 'error')
-    } finally {
-      setSending(false)
-    }
+    if (clean && !sendMutation.isPending) sendMutation.mutate(clean)
   }
 
   // Enter sends, Shift+Enter adds a new line
@@ -108,7 +100,8 @@ export default function MessagesSection({ eventId, userId }: Props) {
   return (
     <section className="card chat">
       <div className="chat-list" ref={listRef} onScroll={onScroll}>
-        {messages === null && <div className="skeleton chat-skeleton" />}
+        {latestQuery.isPending && <div className="skeleton chat-skeleton" />}
+        {latestQuery.isError && <div className="alert alert-conflict" role="alert"><p>{getErrorMessage(latestQuery.error)}</p></div>}
 
         {hasOlder && <button className="btn btn-ghost btn-sm chat-older" onClick={loadOlder}>הודעות קודמות</button>}
 
@@ -153,8 +146,8 @@ export default function MessagesSection({ eventId, userId }: Props) {
           onKeyDown={onKeyDown}
         />
         {text.length > MAX_LENGTH - 80 && <span className="chat-count">{MAX_LENGTH - text.length}</span>}
-        <button className="chat-send" disabled={!text.trim() || sending} aria-label="שליחה">
-          {sending ? <span className="spinner" /> : (
+        <button className="chat-send" disabled={!text.trim() || sendMutation.isPending} aria-label="שליחה">
+          {sendMutation.isPending ? <span className="spinner" /> : (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M21 3 10 14M21 3l-7 18-4-7-7-4z" transform="scale(-1,1) translate(-24,0)" />
             </svg>

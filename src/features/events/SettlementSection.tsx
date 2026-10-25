@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { queryKeys } from '../../api/queryClient'
 import * as settlementsApi from '../../api/settlements'
 import { getErrorMessage } from '../../api/errors'
 import { useToast } from '../../components/ToastContext'
@@ -18,20 +20,13 @@ type Props = {
 // Before closing: a live estimate. After closing: the final payments and who already paid.
 export default function SettlementSection({ event, userId, onClosed }: Props) {
   const { showToast } = useToast()
-  const [summary, setSummary] = useState<EventSummary | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [closing, setClosing] = useState(false)
 
-  // Reloads whenever the page reloads the event (a new price changes the estimate)
-  useEffect(() => {
-    let ignore = false
-    settlementsApi.getSummary(event.id)
-      .then(data => { if (!ignore) setSummary(data) })
-      .catch(err => showToast(getErrorMessage(err), 'error'))
-    return () => {
-      ignore = true
-    }
-  }, [event, showToast])
+  // Its key is under ['event', id], so when the event page reloads after a change
+  // (a new price, for example), the estimate reloads with it
+  const summaryQuery = useQuery({ queryKey: queryKeys.summary(event.id), queryFn: () => settlementsApi.getSummary(event.id) })
+  const summary: EventSummary | null = summaryQuery.data ?? null
 
   async function close() {
     setClosing(true)

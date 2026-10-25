@@ -1,4 +1,6 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '../../api/queryClient'
 import * as settlementsApi from '../../api/settlements'
 import { getErrorMessage, getFieldErrors } from '../../api/errors'
 import { useToast } from '../../components/ToastContext'
@@ -18,21 +20,17 @@ function validate(form: Form): Record<string, string> {
 // "My account for receiving money". Shown masked; the full number only inside the form
 export default function BankAccountCard() {
   const { showToast } = useToast()
-  const [account, setAccount] = useState<BankAccount | null | undefined>(undefined)
-  const [banks, setBanks] = useState<Bank[]>([])
+  const queryClient = useQueryClient()
+  // null = no account yet (the API turns 404 into null); undefined = still loading
+  const accountQuery = useQuery({ queryKey: queryKeys.bankAccount, queryFn: settlementsApi.getMyBankAccount })
+  // The bank list almost never changes, so it stays fresh for an hour
+  const banksQuery = useQuery({ queryKey: queryKeys.banks, queryFn: settlementsApi.getBanks, staleTime: 3_600_000 })
+  const account: BankAccount | null | undefined = accountQuery.data
+  const banks: Bank[] = banksQuery.data ?? []
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<Form>({ bankId: '', branchNumber: '', accountNumber: '', accountHolderName: '' })
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    Promise.all([settlementsApi.getMyBankAccount(), settlementsApi.getBanks()])
-      .then(([acc, list]) => {
-        setAccount(acc)
-        setBanks(list)
-      })
-      .catch(err => showToast(getErrorMessage(err), 'error'))
-  }, [showToast])
 
   function startEdit() {
     setForm(account
@@ -55,7 +53,7 @@ export default function BankAccountCard() {
     try {
       const request = { ...form, bankId: Number(form.bankId), accountHolderName: form.accountHolderName.trim() }
       await settlementsApi.saveMyBankAccount(request)
-      setAccount({ ...request, bankName: banks.find(b => b.id === request.bankId)?.name ?? '' })
+      await queryClient.invalidateQueries({ queryKey: queryKeys.bankAccount })
       setEditing(false)
       showToast('פרטי החשבון נשמרו')
     } catch (err) {
@@ -66,6 +64,7 @@ export default function BankAccountCard() {
     }
   }
 
+  if (accountQuery.isError) return <div className="alert alert-conflict" role="alert"><p>{getErrorMessage(accountQuery.error)}</p></div>
   if (account === undefined) return <div className="card skeleton" style={{ height: 200 }} />
 
   return (

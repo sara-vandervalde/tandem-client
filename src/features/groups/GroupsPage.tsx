@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '../../api/queryClient'
 import { Link, useNavigate } from 'react-router-dom'
 import * as groupsApi from '../../api/groups'
 import { getErrorMessage } from '../../api/errors'
@@ -7,33 +9,32 @@ import { useToast } from '../../components/ToastContext'
 import Modal from '../../components/Modal'
 import { colorFor } from '../../utils/colors'
 import { daysLeft } from '../../utils/dates'
-import type { Group, Invitation } from '../../types/groups'
+import type { Invitation } from '../../types/groups'
 
 export default function GroupsPage() {
   const { user } = useAuth()
   const { showToast } = useToast()
   const navigate = useNavigate()
 
-  const [groups, setGroups] = useState<Group[] | null>(null)
-  const [invitations, setInvitations] = useState<Invitation[]>([])
-  const [error, setError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
   const [creating, setCreating] = useState(false)
   const [respondingId, setRespondingId] = useState<number | null>(null)
 
-  // Groups and pending invitations load together
-  const load = useCallback(async () => {
-    try {
-      const [g, inv] = await Promise.all([groupsApi.getGroups(), groupsApi.getMyInvitations()])
-      setGroups(g)
-      setInvitations(inv)
-    } catch (err) {
-      setError(getErrorMessage(err))
-    }
-  }, [])
+  // React Query loads, caches and tracks loading/error for us - no useEffect, no manual state
+  const groupsQuery = useQuery({ queryKey: queryKeys.groups, queryFn: groupsApi.getGroups })
+  const invitationsQuery = useQuery({ queryKey: queryKeys.myInvitations, queryFn: groupsApi.getMyInvitations })
+  const groups = groupsQuery.data ?? null
+  const invitations = invitationsQuery.data ?? []
+  const failed = groupsQuery.error ?? invitationsQuery.error
+  const error = failed ? getErrorMessage(failed) : null
 
-  useEffect(() => {
-    load()
-  }, [load])
+  // After a change: mark the cached lists as stale, React Query loads them again
+  async function load() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.groups }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.myInvitations }),
+    ])
+  }
 
   async function respond(invitation: Invitation, accept: boolean) {
     setRespondingId(invitation.id)
@@ -118,6 +119,7 @@ export default function GroupsPage() {
         <CreateGroupModal
           onClose={() => setCreating(false)}
           onCreated={id => {
+            queryClient.invalidateQueries({ queryKey: queryKeys.groups })
             showToast('הקבוצה נפתחה! עכשיו אפשר להזמין חברות')
             navigate(`/groups/${id}`)
           }}

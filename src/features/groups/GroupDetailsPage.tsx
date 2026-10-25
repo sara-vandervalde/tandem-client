@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '../../api/queryClient'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import * as groupsApi from '../../api/groups'
 import { getErrorMessage } from '../../api/errors'
@@ -25,28 +27,28 @@ export default function GroupDetailsPage() {
   const { showToast } = useToast()
   const navigate = useNavigate()
 
-  const [group, setGroup] = useState<GroupDetails | null>(null)
-  const [invitations, setInvitations] = useState<Invitation[]>([])
-  const [error, setError] = useState<string | null>(null)
   const [renaming, setRenaming] = useState(false)
   const [confirm, setConfirm] = useState<Confirm | null>(null)
 
+
+  const queryClient = useQueryClient()
+  const groupQuery = useQuery({ queryKey: queryKeys.group(groupId), queryFn: () => groupsApi.getGroup(groupId) })
+  const group: GroupDetails | null = groupQuery.data ?? null
+  const isManagerOfLoaded = group !== null && group.managerId === user?.id
+  // Only the manager may see the group's invitations: "enabled" waits until we know she is
+  const invitationsQuery = useQuery({
+    queryKey: queryKeys.groupInvitations(groupId),
+    queryFn: () => groupsApi.getGroupInvitations(groupId),
+    enabled: isManagerOfLoaded,
+  })
+  const invitations: Invitation[] = isManagerOfLoaded ? invitationsQuery.data ?? [] : []
+  const error = groupQuery.error ? getErrorMessage(groupQuery.error) : null
   const isManager = group?.managerId === user?.id
 
-  const load = useCallback(async () => {
-    try {
-      const g = await groupsApi.getGroup(groupId)
-      setGroup(g)
-      // Only the manager may see the group's invitations
-      setInvitations(g.managerId === user?.id ? await groupsApi.getGroupInvitations(groupId) : [])
-    } catch (err) {
-      setError(getErrorMessage(err))
-    }
-  }, [groupId, user?.id])
-
-  useEffect(() => {
-    load()
-  }, [load])
+  // After a change: the group, its invitations and the groups list are reloaded
+  async function load() {
+    await queryClient.invalidateQueries({ queryKey: queryKeys.groups })
+  }
 
   // Every action: run, show the result, reload. A 409 shows the server's Hebrew reason.
   async function run(action: () => Promise<void>, success: string) {

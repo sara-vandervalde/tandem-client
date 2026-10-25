@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '../../api/queryClient'
 import { Link, useNavigate } from 'react-router-dom'
 import * as eventsApi from '../../api/events'
 import * as groupsApi from '../../api/groups'
@@ -27,26 +29,23 @@ function startOfMonth(date: Date): Date {
 export default function EventsPage() {
   const navigate = useNavigate()
   const { showToast } = useToast()
+  const queryClient = useQueryClient()
 
   const [view, setView] = useState<View>('calendar')
   const [month, setMonth] = useState(() => startOfMonth(new Date()))
-  const [groups, setGroups] = useState<Group[]>([])
   const [groupId, setGroupId] = useState<number | undefined>()
   const [status, setStatus] = useState<EventStatus | 'all'>('all')
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [page, setPage] = useState(1)
-  const [result, setResult] = useState<PagedResult<EventListItem> | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [createDate, setCreateDate] = useState<string | null>(null)
 
   const cells = useMemo(() => monthCells(month), [month])
   const [todayKey] = useState(() => dayKey(new Date()))
   const isFiltered = Boolean(debouncedSearch || status !== 'all' || groupId)
 
-  useEffect(() => {
-    groupsApi.getGroups().then(setGroups).catch(err => setError(getErrorMessage(err)))
-  }, [])
+  const groupsQuery = useQuery({ queryKey: queryKeys.groups, queryFn: groupsApi.getGroups })
+  const groups: Group[] = groupsQuery.data ?? []
 
   // Wait 350ms after the last key press, so we don't call the server on every letter
   useEffect(() => {
@@ -56,27 +55,24 @@ export default function EventsPage() {
 
   // Filtering, sorting and paging all happen on the server.
   // Calendar: every event in the 6 visible weeks. List: one page, nearest date first.
-  useEffect(() => {
-    let ignore = false
+  const filters = useMemo(() => {
     const range = view === 'calendar'
       ? { from: cells[0].toISOString(), to: new Date(cells[41].getTime() + 86_399_000).toISOString(), pageSize: 100 }
       : { page, pageSize: 12, sortBy: 'date' as const, sortDir: 'asc' as const }
-    eventsApi
-      .getEvents({ ...range, groupId, status: status === 'all' ? undefined : status, search: debouncedSearch || undefined })
-      .then(data => {
-        if (!ignore) {
-          setResult(data)
-          setError(null)
-        }
-      })
-      .catch(err => {
-        if (!ignore) setError(getErrorMessage(err))
-      })
-    // If the filters change before the answer arrives, the old answer is ignored
-    return () => {
-      ignore = true
-    }
+    return { ...range, groupId, status: status === 'all' ? undefined : status, search: debouncedSearch || undefined }
   }, [view, cells, page, groupId, status, debouncedSearch])
+
+  // The filters are part of the key: every combination is cached separately,
+  // and an answer that arrives late can never overwrite newer filters.
+  // keepPreviousData keeps the old page on screen while the next one loads (no flicker)
+  const eventsQuery = useQuery({
+    queryKey: queryKeys.events(filters),
+    queryFn: () => eventsApi.getEvents(filters),
+    placeholderData: keepPreviousData,
+  })
+  const result: PagedResult<EventListItem> | null = eventsQuery.data ?? null
+  const failed = eventsQuery.error ?? groupsQuery.error
+  const error = failed ? getErrorMessage(failed) : null
 
   // Events grouped by day, for the calendar cells
   const byDay = useMemo(() => {
@@ -233,6 +229,8 @@ export default function EventsPage() {
           onClose={() => setCreateDate(null)}
           onCreated={ev => {
             setCreateDate(null)
+            // Every cached events list is now out of date
+            queryClient.invalidateQueries({ queryKey: ['events'] })
             showToast(ev.status === 'Draft' ? 'האירוע נשמר כטיוטה' : 'האירוע נוצר, ואת האחראית 🎉')
             navigate(`/events/${ev.id}`)
           }}

@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '../../api/queryClient'
 import { Link, useSearchParams } from 'react-router-dom'
 import * as usersApi from '../../api/users'
 import * as groupsApi from '../../api/groups'
@@ -24,46 +26,38 @@ export default function AdminPage() {
   const tab: Tab = searchParams.get('tab') === 'groups' ? 'groups' : 'users'
 
   const [page, setPage] = useState(1)
-  const [users, setUsers] = useState<PagedResult<User> | null>(null)
-  const [groups, setGroups] = useState<Group[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [busyId, setBusyId] = useState<number | null>(null)
   const [confirm, setConfirm] = useState<Confirm | null>(null)
 
-  const loadUsers = useCallback(async () => {
-    try {
-      setUsers(await usersApi.getUsers(page))
-    } catch (err) {
-      setError(getErrorMessage(err))
-    }
-  }, [page])
+  const queryClient = useQueryClient()
 
-  const loadGroups = useCallback(async () => {
-    try {
-      // For the Admin, the server returns every group in the system
-      setGroups(await groupsApi.getGroups())
-    } catch (err) {
-      setError(getErrorMessage(err))
-    }
-  }, [])
+  // Both lists load at once, so the two tiles show their numbers right away
+  const usersQuery = useQuery({
+    queryKey: queryKeys.users(page),
+    queryFn: () => usersApi.getUsers(page),
+    placeholderData: keepPreviousData,
+  })
+  const groupsQuery = useQuery({ queryKey: queryKeys.groups, queryFn: groupsApi.getGroups })
+  const users: PagedResult<User> | null = usersQuery.data ?? null
+  const groups: Group[] | null = groupsQuery.data ?? null
+  const failed = tab === 'users' ? usersQuery.error : groupsQuery.error
+  const error = failed ? getErrorMessage(failed) : null
 
-  useEffect(() => {
-    if (tab === 'users') loadUsers()
-    else loadGroups()
-  }, [tab, loadUsers, loadGroups])
-
-  async function toggleActive(u: User) {
-    setBusyId(u.id)
-    try {
-      await usersApi.setUserActive(u.id, !u.isActive)
-      showToast(u.isActive ? `${u.fullName} נחסמה` : `החסימה של ${u.fullName} שוחררה`)
-      await loadUsers()
-    } catch (err) {
-      showToast(getErrorMessage(err), 'error')
-    } finally {
-      setBusyId(null)
-    }
+  async function reload() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['users'] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.groups }),
+    ])
   }
+
+  // Releasing a block needs no confirmation, so it runs straight away
+  const releaseMutation = useMutation({
+    mutationFn: (u: User) => usersApi.setUserActive(u.id, true),
+    onSuccess: (_data, u) => showToast(`החסימה של ${u.fullName} שוחררה`),
+    onError: err => showToast(getErrorMessage(err), 'error'),
+    onSettled: reload,
+  })
+  const toggleActive = (u: User) => releaseMutation.mutate(u)
+  const busyId = releaseMutation.isPending ? releaseMutation.variables?.id : null
 
   async function runConfirm() {
     if (!confirm) return
@@ -74,8 +68,7 @@ export default function AdminPage() {
       showToast(getErrorMessage(err), 'error')
     } finally {
       setConfirm(null)
-      if (tab === 'users') await loadUsers()
-      else await loadGroups()
+      await reload()
     }
   }
 

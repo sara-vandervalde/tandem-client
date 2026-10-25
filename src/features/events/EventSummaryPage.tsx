@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { queryKeys } from '../../api/queryClient'
 import { Link, useParams } from 'react-router-dom'
 import * as settlementsApi from '../../api/settlements'
 import { getErrorMessage } from '../../api/errors'
@@ -12,12 +13,10 @@ const mealLabels = { Shared: 'ארוחה משותפת', Catering: 'קייטרי�
 // Everything about the event on one sheet, designed to be printed (or saved as PDF)
 export default function EventSummaryPage() {
   const eventId = Number(useParams().id)
-  const [summary, setSummary] = useState<EventSummary | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    settlementsApi.getSummary(eventId).then(setSummary).catch(err => setError(getErrorMessage(err)))
-  }, [eventId])
+  // Same key as the summary on the event page: coming from there, it shows at once from the cache
+  const summaryQuery = useQuery({ queryKey: queryKeys.summary(eventId), queryFn: () => settlementsApi.getSummary(eventId) })
+  const summary: EventSummary | null = summaryQuery.data ?? null
+  const error = summaryQuery.error ? getErrorMessage(summaryQuery.error) : null
 
   if (error) return <div className="alert alert-conflict" role="alert"><p>{error}</p></div>
   if (!summary) return <div className="card skeleton" style={{ height: 400 }} />

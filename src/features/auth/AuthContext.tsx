@@ -2,6 +2,7 @@ import { createContext, useContext, useState, type ReactNode } from 'react'
 import { TOKEN_KEY, USER_KEY } from '../../api/client'
 import * as authApi from '../../api/auth'
 import type { CurrentUser, LoginRequest, RegisterRequest } from '../../types/auth'
+import { queryClient } from '../../api/queryClient'
 
 type AuthContextValue = {
   user: CurrentUser | null
@@ -47,6 +48,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   function logout() {
+    // Empty the cache, so the next user never sees the previous user's data
+    queryClient.clear()
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(USER_KEY)
     setUser(null)

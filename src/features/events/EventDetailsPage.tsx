@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState, type CSSProperties } from 'react'
+import { useState, type CSSProperties } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '../../api/queryClient'
 import axios from 'axios'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import * as eventsApi from '../../api/events'
@@ -58,11 +60,6 @@ export default function EventDetailsPage() {
   const tabParam = searchParams.get('tab') as Tab | null
   const tab: Tab = tabParam && tabs.includes(tabParam) ? tabParam : 'areas'
 
-  const [event, setEvent] = useState<EventDetails | null>(null)
-  const [group, setGroup] = useState<GroupDetails | null>(null)
-  const [items, setItems] = useState<Item[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState<string | null>(null)
   // The 409 message per area, shown on the card that lost the race
   const [conflicts, setConflicts] = useState<Partial<Record<Area | 'organizer', string>>>({})
   const [editing, setEditing] = useState<Area | null>(null)
@@ -70,46 +67,59 @@ export default function EventDetailsPage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [confirm, setConfirm] = useState<Confirm | null>(null)
 
-  const load = useCallback(async () => {
-    try {
-      // The event and its items load together; the group (members) needs the event's groupId
-      const [ev, list] = await Promise.all([eventsApi.getEvent(eventId), eventsApi.getItems(eventId)])
-      setEvent(ev)
-      setItems(list)
-      setGroup(await groupsApi.getGroup(ev.groupId))
-    } catch (err) {
-      setError(getErrorMessage(err))
-    }
-  }, [eventId])
+  const queryClient = useQueryClient()
 
-  useEffect(() => {
-    load()
-  }, [load])
+  // Three queries. The group waits for the event ("enabled"), because it needs the event's groupId
+  const eventQuery = useQuery({ queryKey: queryKeys.event(eventId), queryFn: () => eventsApi.getEvent(eventId) })
+  const itemsQuery = useQuery({ queryKey: queryKeys.items(eventId), queryFn: () => eventsApi.getItems(eventId) })
+  const groupId = eventQuery.data?.groupId
+  const groupQuery = useQuery({
+    queryKey: queryKeys.group(groupId ?? 0),
+    queryFn: () => groupsApi.getGroup(groupId!),
+    enabled: groupId !== undefined,
+  })
+  const event: EventDetails | null = eventQuery.data ?? null
+  const items: Item[] | null = itemsQuery.data ?? null
+  const group: GroupDetails | null = groupQuery.data ?? null
+  const error = eventQuery.error ? getErrorMessage(eventQuery.error) : null
 
-  // Claiming: success shows a toast. A 409 means someone was faster -
-  // the message stays on that card and the page reloads, so the winner's name appears.
-  async function claim(key: Area | 'organizer') {
-    setBusy(key)
-    setConflicts(prev => ({ ...prev, [key]: undefined }))
-    try {
-      if (key === 'organizer') await eventsApi.claimOrganizer(eventId)
-      else await eventsApi.claimArea(eventId, key)
-      showToast(key === 'organizer' ? 'את האחראית על האירוע 🎉' : `לקחת את ${areaNames[key]}`)
-    } catch (err) {
+  // After any change: everything under ['event', id] (event, items, summary, messages)
+  // and the events lists (the status may have changed) are reloaded
+  async function load() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.event(eventId) }),
+      queryClient.invalidateQueries({ queryKey: ['events'] }),
+    ])
+  }
+
+  // Claiming with useMutation: React Query tracks "pending" for us.
+  // Success shows a toast. A 409 means someone was faster - the message stays on that card,
+  // and onSettled reloads the page either way, so the winner's name appears.
+  const claimMutation = useMutation({
+    mutationFn: (key: Area | 'organizer') =>
+      key === 'organizer' ? eventsApi.claimOrganizer(eventId) : eventsApi.claimArea(eventId, key),
+    onMutate: key => setConflicts(prev => ({ ...prev, [key]: undefined })),
+    onSuccess: (_data, key) =>
+      showToast(key === 'organizer' ? 'את האחראית על האירוע 🎉' : `לקחת את ${areaNames[key]}`),
+    onError: (err, key) => {
       if (isConflict(err)) setConflicts(prev => ({ ...prev, [key]: getErrorMessage(err) }))
       else showToast(getErrorMessage(err), 'error')
-    } finally {
-      setBusy(null)
-      await load()
-    }
-  }
+    },
+    onSettled: () => load(),
+  })
+  const claim = (key: Area | 'organizer') => claimMutation.mutate(key)
+  const busy = claimMutation.isPending ? claimMutation.variables : null
 
   async function runConfirm() {
     if (!confirm) return
     try {
       await confirm.action()
       showToast(confirm.success)
-      if (confirm.after) confirm.after()
+      if (confirm.after) {
+        // The draft was deleted: drop it from the cached events lists before leaving
+        await queryClient.invalidateQueries({ queryKey: ['events'] })
+        confirm.after()
+      }
       else await load()
     } catch (err) {
       showToast(getErrorMessage(err), 'error')
