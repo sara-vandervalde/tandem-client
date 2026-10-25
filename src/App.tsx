@@ -8,6 +8,8 @@ import RegisterPage from './features/auth/RegisterPage'
 import HomePage from './pages/HomePage'
 import GroupsPage from './features/groups/GroupsPage'
 import GroupDetailsPage from './features/groups/GroupDetailsPage'
+import EventsPage from './features/events/EventsPage'
+import EventDetailsPage from './features/events/EventDetailsPage'
 import ComingSoon from './pages/ComingSoon'
 import DesignPreview from './pages/DesignPreview'
 
@@ -28,7 +30,8 @@ export default function App() {
                 <Route index element={<HomePage />} />
                 <Route path="groups" element={<GroupsPage />} />
                 <Route path="groups/:id" element={<GroupDetailsPage />} />
-                <Route path="events" element={<ComingSoon title="אירועים" />} />
+                <Route path="events" element={<EventsPage />} />
+                <Route path="events/:id" element={<EventDetailsPage />} />
                 <Route path="payments" element={<ComingSoon title="תשלומים" />} />
               </Route>
             </Route>

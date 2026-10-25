@@ -3,6 +3,8 @@
 @import './styles/layout.css';
 @import './styles/auth.css';
 @import './styles/groups.css';
+@import './styles/events.css';
+@import './styles/event-page.css';
 
 *,
 *::before,
